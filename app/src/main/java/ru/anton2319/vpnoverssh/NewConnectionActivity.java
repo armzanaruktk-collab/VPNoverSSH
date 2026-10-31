@@ -8,7 +8,10 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
+import android.widget.RadioGroup;
+import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
@@ -20,38 +23,44 @@ import com.google.android.material.textfield.TextInputEditText;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
+import ru.anton2319.vpnoverssh.data.PayloadProfile;
 import ru.anton2319.vpnoverssh.data.SSHConnectionProfile;
+import ru.anton2319.vpnoverssh.data.utils.PayloadProfileManager;
 import ru.anton2319.vpnoverssh.data.utils.SSHConnectionProfileManager;
 
 public class NewConnectionActivity extends AppCompatActivity {
-    View passwordInputLayout;
-    TextInputEditText serverAddressInput, serverPortInput, usernameInput, passwordInput;
-    View addKeyButton, keyCard;
-    FloatingActionButton saveButton;
-    SSHConnectionProfile.AuthenticationType authenticationType = SSHConnectionProfile.AuthenticationType.PASSWORD;
-    String privateKey;
-    TextView keyInfoTextView;
+    private View passwordInputLayout, addKeyButton, keyCard, payloadLabel;
+    private TextInputEditText serverAddressInput, serverPortInput, usernameInput, passwordInput;
+    private FloatingActionButton saveButton;
+    private SSHConnectionProfile.AuthenticationType authenticationType = SSHConnectionProfile.AuthenticationType.PASSWORD;
+    private String privateKey;
+    private TextView keyInfoTextView;
     private static final int READ_REQUEST_CODE = 42;
+    private SSHConnectionProfile sshConnectionProfile = new SSHConnectionProfile();
+    private SSHConnectionProfileManager sshConnectionProfileManager;
+    private PayloadProfileManager payloadManager;
+    private UUID profileUuid;
+    private RadioGroup connectionModeGroup;
+    private Spinner payloadSpinner;
+    private List<PayloadProfile> payloadProfiles = new ArrayList<>();
 
-    SSHConnectionProfile sshConnectionProfile = new SSHConnectionProfile();
-    SSHConnectionProfileManager sshConnectionProfileManager = new SSHConnectionProfileManager(this);
-    UUID profile_uuid;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        if(getIntent().getStringExtra("uuid") != null) {
-            profile_uuid = UUID.fromString(getIntent().getStringExtra("uuid"));
+        sshConnectionProfileManager = new SSHConnectionProfileManager(this);
+        payloadManager = new PayloadProfileManager(this);
+        if (getIntent().getStringExtra("uuid") != null) {
+            profileUuid = UUID.fromString(getIntent().getStringExtra("uuid"));
         }
-
         setContentView(R.layout.activity_new_connection);
-
         ActionBar actionBar = getSupportActionBar();
-        actionBar.setHomeButtonEnabled(true);
-        actionBar.setDisplayHomeAsUpEnabled(true);
+        if (actionBar != null) {
+            actionBar.setHomeButtonEnabled(true);
+            actionBar.setDisplayHomeAsUpEnabled(true);
+        }
 
         serverAddressInput = findViewById(R.id.serverAddressInput);
         serverPortInput = findViewById(R.id.serverPortInput);
@@ -59,151 +68,162 @@ public class NewConnectionActivity extends AppCompatActivity {
         passwordInput = findViewById(R.id.passwordInput);
         passwordInputLayout = findViewById(R.id.passwordInputLayout);
         addKeyButton = findViewById(R.id.addKeyButton);
-        addKeyButton.setVisibility(View.GONE);
         keyCard = findViewById(R.id.keyCard);
         saveButton = findViewById(R.id.floatingActionButton);
+        connectionModeGroup = findViewById(R.id.connectionModeGroup);
+        payloadSpinner = findViewById(R.id.payloadSpinner);
+        payloadLabel = findViewById(R.id.payloadLabel);
 
-        AutoCompleteTextView authenticationTypeDropdown = findViewById(R.id.authenticationTypeInput);
-        ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(this,
+        AutoCompleteTextView authDropdown = findViewById(R.id.authenticationTypeInput);
+        ArrayAdapter<CharSequence> authAdapter = ArrayAdapter.createFromResource(this,
                 R.array.authentication_type_array, android.R.layout.simple_dropdown_item_1line);
-        authenticationTypeDropdown.setAdapter(adapter);
+        authDropdown.setAdapter(authAdapter);
 
-        if(profile_uuid != null) {
-            sshConnectionProfile = sshConnectionProfileManager.loadProfileByUUID(profile_uuid);
+        loadPayloadChoices();
+        if (profileUuid != null) {
+            SSHConnectionProfile loaded = sshConnectionProfileManager.loadProfileByUUID(profileUuid);
+            if (loaded != null) sshConnectionProfile = loaded;
+        }
+        if (sshConnectionProfile.getServerIP() != null) {
             serverAddressInput.setText(sshConnectionProfile.getServerIP());
             serverPortInput.setText(String.valueOf(sshConnectionProfile.getServerPort()));
             usernameInput.setText(sshConnectionProfile.getUsername());
             passwordInput.setText(sshConnectionProfile.getPassword());
-            if(sshConnectionProfile.getAuthenticationType() == SSHConnectionProfile.AuthenticationType.PRIVATE_KEY) {
+        }
+        if (sshConnectionProfile.getAuthenticationType() == SSHConnectionProfile.AuthenticationType.PRIVATE_KEY) {
+            authenticationType = SSHConnectionProfile.AuthenticationType.PRIVATE_KEY;
+            passwordInputLayout.setVisibility(View.GONE);
+            addKeyButton.setVisibility(View.VISIBLE);
+            privateKey = sshConnectionProfile.getPrivateKey();
+            authDropdown.setText("Private Key", false);
+            if (privateKey != null) updateKeyCardData();
+        } else {
+            authDropdown.setText("Password", false);
+        }
+
+        connectionModeGroup.check("PAYLOAD".equals(sshConnectionProfile.getConnectionMode())
+                ? R.id.payloadModeRadio : R.id.directModeRadio);
+        updatePayloadVisibility();
+        connectionModeGroup.setOnCheckedChangeListener((group, checkedId) -> updatePayloadVisibility());
+
+        authDropdown.setOnItemClickListener((parent, view, position, id) -> {
+            if (position == 0) {
+                authenticationType = SSHConnectionProfile.AuthenticationType.PASSWORD;
+                passwordInputLayout.setVisibility(View.VISIBLE);
+                addKeyButton.setVisibility(View.GONE);
+                keyCard.setVisibility(View.GONE);
+            } else {
                 authenticationType = SSHConnectionProfile.AuthenticationType.PRIVATE_KEY;
                 passwordInputLayout.setVisibility(View.GONE);
                 addKeyButton.setVisibility(View.VISIBLE);
-                privateKey = sshConnectionProfile.getPrivateKey();
-                // TODO: add resource links
-                authenticationTypeDropdown.setText("Private Key", false);
-                updateKeyCardData();
             }
-            else {
-                authenticationTypeDropdown.setText("Password", false);
-            }
+        });
+
+        addKeyButton.setVisibility(authenticationType == SSHConnectionProfile.AuthenticationType.PRIVATE_KEY ? View.VISIBLE : View.GONE);
+        saveButton.setOnClickListener(v -> saveProfile());
+        addKeyButton.setOnClickListener(v -> pickFile());
+    }
+
+    private void loadPayloadChoices() {
+        payloadProfiles = payloadManager.loadProfiles();
+        List<String> labels = new ArrayList<>();
+        for (PayloadProfile p : payloadProfiles) labels.add(p.name + " (" + p.proxyHost + ":" + p.proxyPort + ")");
+        if (labels.isEmpty()) labels.add("No saved payloads — open Payload Manager");
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        payloadSpinner.setAdapter(adapter);
+    }
+
+    private void updatePayloadVisibility() {
+        boolean usePayload = connectionModeGroup.getCheckedRadioButtonId() == R.id.payloadModeRadio;
+        payloadLabel.setVisibility(usePayload ? View.VISIBLE : View.GONE);
+        payloadSpinner.setVisibility(usePayload ? View.VISIBLE : View.GONE);
+    }
+
+    private void saveProfile() {
+        String host = serverAddressInput.getText() == null ? "" : serverAddressInput.getText().toString().trim();
+        String portText = serverPortInput.getText() == null ? "" : serverPortInput.getText().toString().trim();
+        String user = usernameInput.getText() == null ? "" : usernameInput.getText().toString().trim();
+        int port;
+        try { port = Integer.parseInt(portText); } catch (Exception e) { port = -1; }
+        if (host.isEmpty() || user.isEmpty() || port < 1 || port > 65535) {
+            Toast.makeText(this, "Enter SSH host, username and a valid port", Toast.LENGTH_LONG).show();
+            return;
         }
-
-        saveButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                sshConnectionProfile.setAuthenticationType(authenticationType);
-                sshConnectionProfile.setServerIP(((TextView) serverAddressInput).getText().toString());
-                sshConnectionProfile.setServerPort(Integer.parseInt(((TextView) serverPortInput).getText().toString()));
-                sshConnectionProfile.setUsername(((TextView) usernameInput).getText().toString());
-                if (authenticationType == SSHConnectionProfile.AuthenticationType.PASSWORD) {
-                    sshConnectionProfile.setPassword(((TextView) passwordInput).getText().toString());
-                }
-                else if (authenticationType == SSHConnectionProfile.AuthenticationType.PRIVATE_KEY) {
-                    sshConnectionProfile.setPrivateKey(privateKey);
-                }
-                sshConnectionProfileManager.saveProfile(sshConnectionProfile);
-                finish();
+        boolean usePayload = connectionModeGroup.getCheckedRadioButtonId() == R.id.payloadModeRadio;
+        if (usePayload && payloadProfiles.isEmpty()) {
+            Toast.makeText(this, "Add a payload in Payload Manager first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        sshConnectionProfile.setAuthenticationType(authenticationType);
+        sshConnectionProfile.setServerIP(host);
+        sshConnectionProfile.setServerPort(port);
+        sshConnectionProfile.setUsername(user);
+        sshConnectionProfile.setConnectionMode(usePayload ? "PAYLOAD" : "DIRECT");
+        if (usePayload) sshConnectionProfile.setPayloadUuid(payloadProfiles.get(payloadSpinner.getSelectedItemPosition()).uuid);
+        else sshConnectionProfile.setPayloadUuid(null);
+        if (authenticationType == SSHConnectionProfile.AuthenticationType.PASSWORD) {
+            sshConnectionProfile.setPassword(passwordInput.getText() == null ? "" : passwordInput.getText().toString());
+            sshConnectionProfile.setPrivateKey(null);
+        } else {
+            if (privateKey == null || privateKey.trim().isEmpty()) {
+                Toast.makeText(this, "Select an SSH private key", Toast.LENGTH_LONG).show();
+                return;
             }
-        });
-
-        addKeyButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                pickFile();
-            }
-        });
-
-        //noinspection Convert2Lambda
-        authenticationTypeDropdown.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                if (position == 0) {
-                    // Password selected
-                    authenticationType = SSHConnectionProfile.AuthenticationType.PASSWORD;
-                    passwordInputLayout.setVisibility(View.VISIBLE);
-                    addKeyButton.setVisibility(View.GONE);
-                    keyCard.setVisibility(View.GONE);
-                } else {
-                    // Private Key selected
-                    authenticationType = SSHConnectionProfile.AuthenticationType.PRIVATE_KEY;
-                    passwordInputLayout.setVisibility(View.GONE);
-                    addKeyButton.setVisibility(View.VISIBLE);
-                }
-            }
-        });
+            sshConnectionProfile.setPrivateKey(privateKey);
+            sshConnectionProfile.setPassword(null);
+        }
+        sshConnectionProfileManager.saveProfile(sshConnectionProfile);
+        finish();
     }
 
     public void pickFile() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
-        // TODO: replace deprecated method
         startActivityForResult(intent, READ_REQUEST_CODE);
     }
 
     private String readTextFromUri(Uri uri) {
-        StringBuilder stringBuilder = new StringBuilder();
-        try {
-            InputStream inputStream = getContentResolver().openInputStream(uri);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+        StringBuilder result = new StringBuilder();
+        try (InputStream input = getContentResolver().openInputStream(uri);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(input))) {
             String line;
-            while ((line = reader.readLine()) != null) {
-                stringBuilder.append(line).append("\n");
-            }
-            inputStream.close();
+            while ((line = reader.readLine()) != null) result.append(line).append("\n");
         } catch (Exception e) {
-            e.printStackTrace();
+            Toast.makeText(this, "Unable to read private key", Toast.LENGTH_LONG).show();
         }
-        return stringBuilder.toString();
+        return result.toString();
     }
 
-    @Override
-    public void onActivityResult(int requestCode, int resultCode, Intent resultData) {
-        super.onActivityResult(requestCode, resultCode, resultData);
-        if (requestCode == READ_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
-            Uri uri;
-            if (resultData != null) {
-                uri = resultData.getData();
-                privateKey = readTextFromUri(uri);
-                updateKeyCardData();
-            }
+    @Override public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == READ_REQUEST_CODE && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+            privateKey = readTextFromUri(data.getData());
+            updateKeyCardData();
         }
     }
 
-    @Override
-    public boolean onSupportNavigateUp() {
-        onBackPressed();
-        return super.onSupportNavigateUp();
+    @Override public boolean onSupportNavigateUp() {
+        finish();
+        return true;
     }
 
     private void updateKeyCardData() {
-        String privateKeyString = privateKey;
-        privateKeyString = privateKeyString.replace("-----BEGIN OPENSSH PRIVATE KEY-----", "")
-                .replace("-----END OPENSSH PRIVATE KEY-----", "");
-        privateKeyString = privateKeyString.replace("-----BEGIN PRIVATE KEY-----", "")
-                .replace("-----END PRIVATE KEY-----", "");
-        String privatekeyPreview = "";
+        if (privateKey == null) return;
+        String preview = privateKey.replace("-----BEGIN OPENSSH PRIVATE KEY-----", "")
+                .replace("-----END OPENSSH PRIVATE KEY-----", "")
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "").trim();
         keyInfoTextView = findViewById(R.id.keyInfoTextView);
-        if(privateKeyString.length() > 25) {
-            privatekeyPreview = privateKeyString.substring(0, 25) + "•••••" + "\n";
-            keyInfoTextView.setText(privatekeyPreview);
-        }
-        if(privateKey.length() > 55) {
-            privatekeyPreview = privatekeyPreview + "•••••" +privateKeyString.substring(privateKeyString.length() - 26, privateKeyString.length() - 1);
-            keyInfoTextView.setText(privatekeyPreview);
-        }
+        if (preview.length() > 50) preview = preview.substring(0, 24) + "•••••\n•••••" + preview.substring(preview.length() - 24);
+        keyInfoTextView.setText(preview);
         keyCard.setVisibility(View.VISIBLE);
-
-        MaterialButton deleteKeyButton = findViewById(R.id.deleteKeyButton);
-
-        //noinspection Convert2Lambda
-        deleteKeyButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                keyInfoTextView.setText("");
-                privateKey = null;
-                keyCard.setVisibility(View.GONE);
-            }
+        MaterialButton deleteButton = findViewById(R.id.deleteKeyButton);
+        deleteButton.setOnClickListener(v -> {
+            keyInfoTextView.setText("");
+            privateKey = null;
+            keyCard.setVisibility(View.GONE);
         });
     }
 }
