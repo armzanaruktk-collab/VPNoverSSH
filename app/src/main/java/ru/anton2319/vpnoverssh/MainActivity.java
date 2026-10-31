@@ -89,6 +89,10 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        Button payloadManagerButton = findViewById(R.id.payloadManagerButton);
+        payloadManagerButton.setOnClickListener(v ->
+                startActivity(new Intent(MainActivity.this, PayloadManagerActivity.class)));
+
         ImageButton addButton = findViewById(R.id.addProfileButton);
 
         //noinspection Convert2Lambda
