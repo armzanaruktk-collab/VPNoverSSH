@@ -54,49 +54,18 @@
         </LinearLayout>
 
         <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="8dp"
-            android:paddingTop="10dp"
-            android:text="Connection Mode"
-            android:textStyle="bold" />
-
-        <RadioGroup
-            android:id="@+id/connectionModeGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:padding="4dp">
-
-            <RadioButton
-                android:id="@+id/directModeRadio"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:text="Direct SSH" />
-
-            <RadioButton
-                android:id="@+id/payloadModeRadio"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="20dp"
-                android:text="Payload Tunnel" />
-        </RadioGroup>
-
-        <TextView
             android:id="@+id/payloadLabel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingStart="8dp"
-            android:text="Saved Payload"
-            android:visibility="gone" />
+            android:paddingTop="10dp"
+            android:text="Payload (optional — Direct SSH if none selected)" />
 
         <Spinner
             android:id="@+id/payloadSpinner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="8dp"
-            android:visibility="gone" />
+            android:padding="8dp" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/usernameInputLayout"
