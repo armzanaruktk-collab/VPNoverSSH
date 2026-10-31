@@ -32,7 +32,7 @@ import ru.anton2319.vpnoverssh.data.utils.PayloadProfileManager;
 import ru.anton2319.vpnoverssh.data.utils.SSHConnectionProfileManager;
 
 public class NewConnectionActivity extends AppCompatActivity {
-    private View passwordInputLayout, addKeyButton, keyCard, payloadLabel;
+    private View passwordInputLayout, addKeyButton, keyCard, payloadLabel;\n    private TextInputEditText profileNameInput;
     private TextInputEditText serverAddressInput, serverPortInput, usernameInput, passwordInput;
     private FloatingActionButton saveButton;
     private SSHConnectionProfile.AuthenticationType authenticationType = SSHConnectionProfile.AuthenticationType.PASSWORD;
@@ -60,7 +60,7 @@ public class NewConnectionActivity extends AppCompatActivity {
             actionBar.setDisplayHomeAsUpEnabled(true);
         }
 
-        serverAddressInput = findViewById(R.id.serverAddressInput);
+        profileNameInput = findViewById(R.id.profileNameInput);\n        serverAddressInput = findViewById(R.id.serverAddressInput);
         serverPortInput = findViewById(R.id.serverPortInput);
         usernameInput = findViewById(R.id.usernameInput);
         passwordInput = findViewById(R.id.passwordInput);
@@ -81,7 +81,7 @@ public class NewConnectionActivity extends AppCompatActivity {
             SSHConnectionProfile loaded = sshConnectionProfileManager.loadProfileByUUID(profileUuid);
             if (loaded != null) sshConnectionProfile = loaded;
         }
-        if (sshConnectionProfile.getServerIP() != null) {
+        if (sshConnectionProfile.getServerIP() != null) {\n            profileNameInput.setText(sshConnectionProfile.getProfileName());
             serverAddressInput.setText(sshConnectionProfile.getServerIP());
             serverPortInput.setText(String.valueOf(sshConnectionProfile.getServerPort()));
             usernameInput.setText(sshConnectionProfile.getUsername());
@@ -128,7 +128,7 @@ public class NewConnectionActivity extends AppCompatActivity {
     }
 
     private void saveProfile() {
-        String host = serverAddressInput.getText() == null ? "" : serverAddressInput.getText().toString().trim();
+        String name = profileNameInput.getText() == null ? "" : profileNameInput.getText().toString().trim();\n        String host = serverAddressInput.getText() == null ? "" : serverAddressInput.getText().toString().trim();
         String portText = serverPortInput.getText() == null ? "" : serverPortInput.getText().toString().trim();
         String user = usernameInput.getText() == null ? "" : usernameInput.getText().toString().trim();
         int port;
@@ -143,7 +143,7 @@ public class NewConnectionActivity extends AppCompatActivity {
             Toast.makeText(this, "Selected payload is unavailable", Toast.LENGTH_LONG).show();
             return;
         }
-        sshConnectionProfile.setAuthenticationType(authenticationType);
+        sshConnectionProfile.setProfileName(name);\n        sshConnectionProfile.setAuthenticationType(authenticationType);
         sshConnectionProfile.setServerIP(host);
         sshConnectionProfile.setServerPort(port);
         sshConnectionProfile.setUsername(user);
