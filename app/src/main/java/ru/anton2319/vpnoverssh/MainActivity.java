@@ -189,6 +189,8 @@ public class MainActivity extends AppCompatActivity {
                 if (privateKey != null && !privateKey.isEmpty()) {
                     sshIntent.putExtra("privateKey", privateKey);
                 }
+                sshIntent.putExtra("connectionMode", selectedProfile.getConnectionMode());
+                sshIntent.putExtra("payloadUuid", selectedProfile.getPayloadUuid());
                 sshIntent.putExtra("hostname", hostname);
                 if(!String.valueOf(port).isEmpty() || between(port, 1 , 65535)) {
                     sshIntent.putExtra("port", String.valueOf(port));
