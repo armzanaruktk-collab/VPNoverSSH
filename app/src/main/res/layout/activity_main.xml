@@ -45,6 +45,16 @@
             android:contentDescription="Edit this profile"
             app:srcCompat="@drawable/baseline_edit_24" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/payloadManagerButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:minHeight="48dp"
+            android:text="PAYLOAD"
+            android:textAllCaps="false"
+            app:cornerRadius="12dp" />
+
         <ImageButton
             android:id="@+id/addProfileButton"
             android:layout_width="wrap_content"
