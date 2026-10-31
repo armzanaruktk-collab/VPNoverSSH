@@ -11,6 +11,7 @@ public class SSHConnectionProfile {
     private AuthenticationType authenticationType;
     private String password;
     private String privateKey;
+    private String profileName = "bd_ready_01";
     private String connectionMode = "DIRECT";
     private String payloadUuid;
 
@@ -40,4 +41,21 @@ public class SSHConnectionProfile {
     public void setConnectionMode(String value) { connectionMode = value; }
     public String getPayloadUuid() { return payloadUuid; }
     public void setPayloadUuid(String value) { payloadUuid = value; }
+    public String getProfileName() { return (profileName == null || profileName.isEmpty()) ? (serverIP != null ? serverIP : "bd_ready_01") : profileName; }
+    public void setProfileName(String value) { profileName = value; }
+
+    public SSHConnectionProfile copyAsNew(String newName) {
+        SSHConnectionProfile copy = new SSHConnectionProfile();
+        copy.uuid = UUID.randomUUID();
+        copy.setProfileName((newName != null && !newName.trim().isEmpty()) ? newName : (this.getProfileName() + " (สำเนา)"));
+        copy.setServerIP(this.getServerIP());
+        copy.setServerPort(this.getServerPort());
+        copy.setUsername(this.getUsername());
+        copy.setPassword(this.getPassword());
+        copy.setPrivateKey(this.getPrivateKey());
+        copy.setAuthenticationType(this.getAuthenticationType());
+        copy.setConnectionMode(this.getConnectionMode());
+        copy.setPayloadUuid(this.getPayloadUuid());
+        return copy;
+    }
 }

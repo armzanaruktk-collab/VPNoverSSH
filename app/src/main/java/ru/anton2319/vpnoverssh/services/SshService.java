@@ -19,6 +19,7 @@ import java.util.List;
 import ru.anton2319.vpnoverssh.data.PayloadProfile;
 import ru.anton2319.vpnoverssh.data.singleton.PortForward;
 import ru.anton2319.vpnoverssh.data.utils.PayloadProfileManager;
+import ru.anton2319.vpnoverssh.utils.ConnectionLogger;
 
 public class SshService extends Service {
     private static final String TAG = "SshService";
@@ -46,29 +47,44 @@ public class SshService extends Service {
         try { port = Integer.parseInt(intent.getStringExtra("port")); }
         catch (Exception e) { port = 22; }
         if (host == null || host.trim().isEmpty() || user == null || user.trim().isEmpty()
-                || port < 1 || port > 65535) throw new IOException("Invalid SSH server settings");
+                || port < 1 || port > 65535) {
+            ConnectionLogger.getInstance().error("การตั้งค่า SSH ไม่ถูกต้อง (ตรวจสอบ Host, Port หรือ Username)");
+            throw new IOException("Invalid SSH server settings");
+        }
+
+        ConnectionLogger.getInstance().info("กำลังเตรียมการเชื่อมต่อ SSH: " + host + ":" + port + " (" + user + ")");
 
         conn = new Connection(host, port);
         String mode = intent.getStringExtra("connectionMode");
         if ("PAYLOAD".equals(mode)) {
             String payloadUuid = intent.getStringExtra("payloadUuid");
             PayloadProfile selected = findPayload(payloadUuid);
-            if (selected == null) throw new IOException("Selected payload was not found. Open the SSH profile and select a saved payload.");
+            if (selected == null) {
+                ConnectionLogger.getInstance().error("ไม่พบ Payload ที่เลือก กรุณาตรวจสอบในหน้าจัดการ Payload");
+                throw new IOException("Selected payload was not found. Open the SSH profile and select a saved payload.");
+            }
             if (selected.proxyHost == null || selected.proxyHost.trim().isEmpty()
                     || selected.proxyPort < 1 || selected.proxyPort > 65535) {
+                ConnectionLogger.getInstance().error("Proxy Host หรือ Port ของ Payload ไม่ถูกต้อง (" + selected.proxyHost + ":" + selected.proxyPort + ")");
                 throw new IOException("Payload proxy host or port is invalid");
             }
+            ConnectionLogger.getInstance().info("กำลังเตรียม HTTP CONNECT Proxy: " + selected.proxyHost + ":" + selected.proxyPort);
             String[] headers = parseConnectPayload(selected.payload, host, port);
+            ConnectionLogger.getInstance().info("แทรก Payload Headers (" + headers.length + " รายการ)");
             conn.setProxyData(new HTTPProxyData(selected.proxyHost.trim(), selected.proxyPort, null, null, headers));
             Log.i(TAG, "Connecting SSH through configured HTTP CONNECT payload proxy " + selected.proxyHost + ":" + selected.proxyPort);
         } else {
+            ConnectionLogger.getInstance().info("โหมดเชื่อมต่อ: Direct SSH (ไม่ผ่าน Proxy)");
             Log.i(TAG, "Connecting directly to SSH server " + host + ":" + port);
         }
 
+        ConnectionLogger.getInstance().info("กำลังเริ่ม TCP Connection และเจรจา Handshake...");
         conn.connect();
+        ConnectionLogger.getInstance().success("SSH Handshake เชื่อมต่อสำเร็จ!");
         PortForward.getInstance().setConn(conn);
 
         boolean authenticated = false;
+        ConnectionLogger.getInstance().info("กำลังยืนยันตัวตนผู้ใช้: " + user + (privateKey != null && !privateKey.trim().isEmpty() ? " ด้วย Private Key" : " ด้วยรหัสผ่าน"));
         if (privateKey != null && !privateKey.trim().isEmpty()) {
             authenticated = conn.authenticateWithPublicKey(user, privateKey.toCharArray(), password);
         } else if (password != null && !password.isEmpty()) {
@@ -76,14 +92,20 @@ public class SshService extends Service {
         } else {
             authenticated = conn.authenticateWithNone(user);
         }
-        if (!authenticated) throw new IOException("SSH authentication failed. Check username, password or private key.");
+        if (!authenticated) {
+            ConnectionLogger.getInstance().error("การยืนยันตัวตนล้มเหลว (SSH Auth Failed) ตรวจสอบ Username, Password หรือ Private Key");
+            throw new IOException("SSH authentication failed. Check username, password or private key.");
+        }
+        ConnectionLogger.getInstance().success("ยืนยันตัวตนสำเร็จแล้ว (Authenticated as " + user + ")");
 
         int localPort;
         try { localPort = Integer.parseInt(sharedPreferences.getString("forwarder_port", "1080")); }
         catch (Exception e) { localPort = 1080; }
         if (localPort < 1 || localPort > 65535) localPort = 1080;
+        ConnectionLogger.getInstance().info("กำลังสร้าง Local SOCKS5 Dynamic Forwarder พอร์ต " + localPort + "...");
         forwarder = conn.createDynamicPortForwarder(localPort);
         PortForward.getInstance().setForwarder(forwarder);
+        ConnectionLogger.getInstance().success("Dynamic Forwarder เปิดทำงานแล้วบน 127.0.0.1:" + localPort);
         Log.i(TAG, "SSH authenticated; local SOCKS5 forwarder listening on 127.0.0.1:" + localPort);
     }
 
@@ -161,10 +183,13 @@ public class SshService extends Service {
                 }
             } catch (IOException | RuntimeException e) {
                 Log.e(TAG, "SSH tunnel failed: " + e.getMessage(), e);
+                ConnectionLogger.getInstance().error("SSH ล้มเหลว: " + e.getMessage());
+                ConnectionLogger.getInstance().warn("แนวทางแก้ไข: ตรวจสอบว่าโฮสต์ SSH ออนไลน์, พอร์ตไม่ถูกบล็อก, และข้อมูลรหัสผ่าน/คีย์ถูกต้อง");
                 closeConnection();
                 stopSelf();
             } finally {
                 if (Thread.currentThread().isInterrupted()) {
+                    ConnectionLogger.getInstance().info("อุโมงค์ SSH ถูกยกเลิกตามคำสั่งผู้ใช้ (Disconnected)");
                     closeConnection();
                     stopSelf();
                 }

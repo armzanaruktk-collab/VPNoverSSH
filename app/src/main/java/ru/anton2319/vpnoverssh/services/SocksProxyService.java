@@ -98,6 +98,7 @@ public class SocksProxyService extends VpnService {
 
     private void startVpn() throws IOException {
         try {
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().info("กำลังสร้าง VpnService Interface (MTU: 1500, IP: 26.26.26.1)...");
             // Get the FileDescriptor for the VPN interface
             ParcelFileDescriptor vpnInterface;
             Builder builder = new VpnService.Builder();
@@ -110,9 +111,10 @@ public class SocksProxyService extends VpnService {
                 excludedIps.add(ipATON(getDnsIpFuture.get()));
                 addRoutesExcluding(builder, excludedIps);
             }
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().info("กำหนด DNS Resolver IP: " + getDnsIpFuture.get());
             if (getSelectedAppsFuture.get().isEmpty()) {
                 builder.addDnsServer(getDnsIpFuture.get())
-                        .addDisallowedApplication("ru.anton2319.vpnoverssh");
+                        .addDisallowedApplication(getPackageName());
             }
             else {
                 for (String packageName : getSelectedAppsFuture.get()) {
@@ -121,6 +123,7 @@ public class SocksProxyService extends VpnService {
             }
 
             vpnInterface = builder.establish();
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().success("VPN Interface เชื่อมต่อเสร็จสมบูรณ์ (TUN FD: " + vpnInterface.getFd() + ")");
 
             SocksPersistent.getInstance().setVpnInterface(vpnInterface);
 
@@ -142,6 +145,7 @@ public class SocksProxyService extends VpnService {
 
             engine.Engine.insert(key);
             engine.Engine.start();
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().success("Tun2Socks ทำงานแล้ว: อุโมงค์ VPN พร้อมรับ-ส่งข้อมูลทั้งหมดผ่าน SSH");
 
             while (true) {
                 if (Thread.interrupted()) {
@@ -151,9 +155,12 @@ public class SocksProxyService extends VpnService {
             }
         } catch (InterruptedException e) {
             Log.d(TAG, "Stopping service");
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().info("บริการ VPN หยุดทำงานตามคำสั่ง");
             onDestroy();
         } catch (Exception e) {
             Log.e(TAG, "VPN thread error: ", e);
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().error("VpnService ล้มเหลว: " + e.getMessage());
+            ru.anton2319.vpnoverssh.utils.ConnectionLogger.getInstance().warn("แนวทางแก้ไข: ตรวจสอบการอนุญาต VpnService หรือตรวจเช็กพอร์ต Forwarder");
             e.printStackTrace();
             stopSelf();
         }

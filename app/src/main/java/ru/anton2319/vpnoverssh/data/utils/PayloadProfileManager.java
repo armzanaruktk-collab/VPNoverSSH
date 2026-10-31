@@ -31,7 +31,7 @@ public class PayloadProfileManager {
     }
 
     public synchronized List<PayloadProfile> loadProfiles() {
-        if (!file.getBaseFile().exists()) return new ArrayList<>();
+        if (!file.getBaseFile().exists()) return seedDefaults();
         try (InputStream in = file.openRead();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[4096];
@@ -39,11 +39,47 @@ public class PayloadProfileManager {
             while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
             List<PayloadProfile> profiles = gson.fromJson(
                     new String(out.toByteArray(), StandardCharsets.UTF_8), listType);
-            return profiles == null ? new ArrayList<>() : profiles;
+            if (profiles == null || profiles.isEmpty()) {
+                return seedDefaults();
+            }
+            return profiles;
         } catch (Exception e) {
             Log.e(TAG, "Unable to read payload profiles", e);
-            return new ArrayList<>();
+            return seedDefaults();
         }
+    }
+
+    private synchronized List<PayloadProfile> seedDefaults() {
+        List<PayloadProfile> defaults = new ArrayList<>();
+        PayloadProfile p1 = new PayloadProfile();
+        p1.uuid = "default-mypayload-uuid";
+        p1.name = "MyPayload";
+        p1.description = "Default HTTP CONNECT payload";
+        p1.proxyHost = "proxy.example.com";
+        p1.proxyPort = 8080;
+        p1.payload = "CONNECT [host_port] HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf]Connection: keep-alive[crlf][crlf]";
+        defaults.add(p1);
+
+        PayloadProfile p2 = new PayloadProfile();
+        p2.uuid = "default-thailand01-uuid";
+        p2.name = "Thailand-01";
+        p2.description = "Thailand High Speed Proxy";
+        p2.proxyHost = "th-proxy.com";
+        p2.proxyPort = 8080;
+        p2.payload = "CONNECT [host_port] HTTP/1.1[crlf]Host: [host][crlf]Proxy-Connection: Keep-Alive[crlf][crlf]";
+        defaults.add(p2);
+
+        PayloadProfile p3 = new PayloadProfile();
+        p3.uuid = "default-bestspeed-uuid";
+        p3.name = "BestSpeed";
+        p3.description = "High Speed Cloud Proxy";
+        p3.proxyHost = "bestproxy.net";
+        p3.proxyPort = 80;
+        p3.payload = "CONNECT [host_port] HTTP/1.1[crlf]Host: [host_port][crlf]User-Agent: [ua][crlf][crlf]";
+        defaults.add(p3);
+
+        saveProfiles(defaults);
+        return defaults;
     }
 
     public synchronized boolean saveProfiles(List<PayloadProfile> profiles) {

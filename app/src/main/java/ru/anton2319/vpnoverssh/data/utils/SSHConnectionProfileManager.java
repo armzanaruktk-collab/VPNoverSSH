@@ -5,127 +5,144 @@ import android.util.Log;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.internal.LinkedTreeMap;
 import com.google.gson.reflect.TypeToken;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import ru.anton2319.vpnoverssh.data.SSHConnectionProfile;
 
-
-// whoever reads this... I'm sorry
-// In case you encountered any bugs here report them to issues, don't spend your precious time
-// If for some reason you are debugging this:
-// Use debugger, and everything will suddenly make sense
-
 public class SSHConnectionProfileManager {
     private static final String TAG = "SSHConnectionProfileManager";
     private static final String FILE_NAME = "ssh_profiles.json";
 
-    private Context context;
+    private final Context context;
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    private final Type listType = new TypeToken<List<SSHConnectionProfile>>() {}.getType();
 
     public SSHConnectionProfileManager(Context context) {
-        this.context = context;
+        this.context = context.getApplicationContext();
     }
 
-    public void saveProfiles(List<SSHConnectionProfile> profiles) {
-        Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    public synchronized void saveProfiles(List<SSHConnectionProfile> profiles) {
         String json = gson.toJson(profiles);
-
-        try {
-            FileOutputStream fileOutputStream = context.openFileOutput(FILE_NAME, Context.MODE_PRIVATE);
-            fileOutputStream.write(json.getBytes());
-            fileOutputStream.close();
-        } catch (IOException e) {
-            Log.e(TAG, "Error saving SSH connection profiles: " + e.getMessage());
+        try (FileOutputStream fos = context.openFileOutput(FILE_NAME, Context.MODE_PRIVATE)) {
+            fos.write(json.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving SSH profiles: " + e.getMessage());
         }
     }
 
-    public void saveProfile(SSHConnectionProfile profile) {
-        List<LinkedTreeMap> existingProfiles = loadProfilesAsLinkedTreeMap();
-        boolean profileExists = false;
-
-        for (int i = 0; i < existingProfiles.size(); i++) {
-            if (existingProfiles.get(i).get("uuid").equals(profile.uuid.toString())) {
-                existingProfiles.set(i, new Gson().fromJson(new Gson().toJson(profile), LinkedTreeMap.class));
-                profileExists = true;
+    public synchronized void saveProfile(SSHConnectionProfile profile) {
+        if (profile == null) return;
+        List<SSHConnectionProfile> existing = loadProfiles();
+        boolean replaced = false;
+        for (int i = 0; i < existing.size(); i++) {
+            if (existing.get(i).uuid != null && existing.get(i).uuid.equals(profile.uuid)) {
+                existing.set(i, profile);
+                replaced = true;
                 break;
             }
         }
-
-        if (!profileExists) {
-            existingProfiles.add(new Gson().fromJson(new Gson().toJson(profile), LinkedTreeMap.class));
+        if (!replaced) {
+            existing.add(profile);
         }
-
-        saveProfiles(new Gson().fromJson(new Gson().toJson(existingProfiles), TypeToken.getParameterized(List.class, SSHConnectionProfile.class).getType()));
+        saveProfiles(existing);
     }
 
-    public SSHConnectionProfile loadProfileByUUID(UUID uuid) {
-        List<SSHConnectionProfile> profiles = new Gson().fromJson(new Gson().toJson(loadProfiles()), TypeToken.getParameterized(List.class, SSHConnectionProfile.class).getType());
-
+    public synchronized SSHConnectionProfile loadProfileByUUID(UUID uuid) {
+        if (uuid == null) return null;
+        List<SSHConnectionProfile> profiles = loadProfiles();
         for (SSHConnectionProfile profile : profiles) {
-            if (profile.uuid.equals(uuid)) {
+            if (profile != null && uuid.equals(profile.uuid)) {
                 return profile;
             }
         }
-
         return null;
     }
 
-    public List<SSHConnectionProfile> loadProfiles() {
+    public synchronized List<SSHConnectionProfile> loadProfiles() {
         List<SSHConnectionProfile> profiles = new ArrayList<>();
-
         try {
-            FileInputStream fileInputStream = context.openFileInput(FILE_NAME);
-            InputStreamReader inputStreamReader = new InputStreamReader(fileInputStream);
-            BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
-            StringBuilder stringBuilder = new StringBuilder();
+            FileInputStream fis = context.openFileInput(FILE_NAME);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
             String line;
-
-            while ((line = bufferedReader.readLine()) != null) {
-                stringBuilder.append(line);
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
             }
+            reader.close();
 
-            String json = stringBuilder.toString();
-
-            Gson gson = new Gson();
-            profiles = gson.fromJson(json, ArrayList.class);
-        } catch (IOException e) {
-            Log.e(TAG, "Error loading SSH connection profiles: " + e.getMessage());
+            String json = sb.toString().trim();
+            if (!json.isEmpty()) {
+                // Safely deserialize with full TypeToken
+                Object parsed = new Gson().fromJson(json, Object.class);
+                if (parsed instanceof List) {
+                    List<?> rawList = (List<?>) parsed;
+                    for (Object item : rawList) {
+                        try {
+                            SSHConnectionProfile p = SSHConnectionProfile.fromLinkedTreeMap(item);
+                            if (p != null) {
+                                profiles.add(p);
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            if (profiles.isEmpty()) {
+                return seedDefaults();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading SSH profiles: " + e.getMessage());
+            return seedDefaults();
         }
 
         return profiles;
     }
 
-    public List<LinkedTreeMap> loadProfilesAsLinkedTreeMap() {
-        List<SSHConnectionProfile> profiles = new ArrayList<>();
-
-        try {
-            FileInputStream fileInputStream = context.openFileInput(FILE_NAME);
-            InputStreamReader inputStreamReader = new InputStreamReader(fileInputStream);
-            BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
-            StringBuilder stringBuilder = new StringBuilder();
-            String line;
-
-            while ((line = bufferedReader.readLine()) != null) {
-                stringBuilder.append(line);
+    public synchronized void deleteProfile(UUID uuid) {
+        if (uuid == null) return;
+        List<SSHConnectionProfile> existing = loadProfiles();
+        boolean removed = false;
+        for (int i = 0; i < existing.size(); i++) {
+            if (existing.get(i).uuid != null && existing.get(i).uuid.equals(uuid)) {
+                existing.remove(i);
+                removed = true;
+                break;
             }
-
-            String json = stringBuilder.toString();
-
-            Gson gson = new Gson();
-            profiles = gson.fromJson(json, TypeToken.getParameterized(List.class, SSHConnectionProfile.class).getType());
-        } catch (IOException e) {
-            Log.e(TAG, "Error loading SSH connection profiles: " + e.getMessage());
         }
+        if (removed) {
+            if (existing.isEmpty()) {
+                seedDefaults();
+            } else {
+                saveProfiles(existing);
+            }
+        }
+    }
 
-        return new Gson().fromJson(new Gson().toJson(profiles), TypeToken.getParameterized(List.class, LinkedTreeMap.class).getType());
+    public synchronized List<SSHConnectionProfile> seedDefaults() {
+        List<SSHConnectionProfile> defaults = new ArrayList<>();
+        SSHConnectionProfile p1 = new SSHConnectionProfile("bd.sshserver.net", 22, "vpnuser", SSHConnectionProfile.AuthenticationType.PASSWORD);
+        p1.setProfileName("bd_ready_01");
+        p1.setPassword("vpnpassword");
+        p1.setConnectionMode("PAYLOAD");
+        p1.setPayloadUuid("default-mypayload-uuid");
+        defaults.add(p1);
+
+        SSHConnectionProfile p2 = new SSHConnectionProfile("sg.sshserver.net", 443, "vpnuser", SSHConnectionProfile.AuthenticationType.PASSWORD);
+        p2.setProfileName("SG_Gaming_01");
+        p2.setPassword("vpnpassword");
+        p2.setConnectionMode("DIRECT");
+        defaults.add(p2);
+
+        saveProfiles(defaults);
+        return defaults;
     }
 }
