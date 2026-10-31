@@ -10,131 +10,165 @@ import androidx.preference.PreferenceManager;
 
 import com.trilead.ssh2.Connection;
 import com.trilead.ssh2.DynamicPortForwarder;
+import com.trilead.ssh2.HTTPProxyData;
 
 import java.io.IOException;
-import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
 
+import ru.anton2319.vpnoverssh.data.PayloadProfile;
 import ru.anton2319.vpnoverssh.data.singleton.PortForward;
+import ru.anton2319.vpnoverssh.data.utils.PayloadProfileManager;
 
 public class SshService extends Service {
-
     private static final String TAG = "SshService";
-    Thread sshThread;
-    Connection conn;
-    DynamicPortForwarder forwarder;
-    SharedPreferences sharedPreferences;
+    private Thread sshThread;
+    private volatile Connection conn;
+    private volatile DynamicPortForwarder forwarder;
+    private SharedPreferences sharedPreferences;
 
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        // Start the SSH tunneling code
-        sshThread = PortForward.getInstance().getSshThread();
-        if (sshThread != null) {
-            sshThread.interrupt();
-        }
+        Thread previous = PortForward.getInstance().getSshThread();
+        if (previous != null) previous.interrupt();
         sshThread = newSshThread(intent);
         PortForward.getInstance().setSshThread(sshThread);
         sshThread.start();
-
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
-    public void initiateSSH(Intent intent) throws IOException, RuntimeException {
-        Log.d(TAG, "Starting trilead.ssh2 service");
-
+    public void initiateSSH(Intent intent) throws IOException {
         String user = intent.getStringExtra("user");
         String host = intent.getStringExtra("hostname");
         String password = intent.getStringExtra("password");
-        //noinspection DataFlowIssue
-        int port = Integer.parseInt(Optional.of(intent.getStringExtra("port")).orElse(String.valueOf(22)));
         String privateKey = intent.getStringExtra("privateKey");
+        int port;
+        try { port = Integer.parseInt(intent.getStringExtra("port")); }
+        catch (Exception e) { port = 22; }
+        if (host == null || host.trim().isEmpty() || user == null || user.trim().isEmpty()
+                || port < 1 || port > 65535) throw new IOException("Invalid SSH server settings");
 
         conn = new Connection(host, port);
+        String mode = intent.getStringExtra("connectionMode");
+        if ("PAYLOAD".equals(mode)) {
+            String payloadUuid = intent.getStringExtra("payloadUuid");
+            PayloadProfile selected = findPayload(payloadUuid);
+            if (selected == null) throw new IOException("Selected payload was not found. Open the SSH profile and select a saved payload.");
+            if (selected.proxyHost == null || selected.proxyHost.trim().isEmpty()
+                    || selected.proxyPort < 1 || selected.proxyPort > 65535) {
+                throw new IOException("Payload proxy host or port is invalid");
+            }
+            String[] headers = parseConnectPayload(selected.payload, host, port);
+            conn.setProxyData(new HTTPProxyData(selected.proxyHost.trim(), selected.proxyPort, null, null, headers));
+            Log.i(TAG, "Connecting SSH through configured HTTP CONNECT payload proxy " + selected.proxyHost + ":" + selected.proxyPort);
+        } else {
+            Log.i(TAG, "Connecting directly to SSH server " + host + ":" + port);
+        }
+
         conn.connect();
         PortForward.getInstance().setConn(conn);
 
-        // Authenticate with the SSH server
-
-        int attempts = 1;
-        boolean isAuthenticated = false;
-
-        while (attempts-- > 0) {
-            if (password == null && privateKey == null) {
-                isAuthenticated = conn.authenticateWithNone(user);
-            }
-
-            if (privateKey != null && password != null) {
-                isAuthenticated = conn.authenticateWithPublicKey(user, privateKey.toCharArray(), "");
-                if (isAuthenticated) {
-                    break;
-                }
-                isAuthenticated = conn.authenticateWithPassword(user, password);
-                if (!isAuthenticated) {
-                    throw new RuntimeException("Cannot authenticate with the provided credentials");
-                }
-            }
-
-            if (privateKey != null) {
-                isAuthenticated = conn.authenticateWithPublicKey(user, privateKey.toCharArray(), "");
-            }
-
-            if (password != null) {
-                isAuthenticated = conn.authenticateWithPassword(user, password);
-            }
-
-            if(isAuthenticated) {
-                break;
-            }
+        boolean authenticated = false;
+        if (privateKey != null && !privateKey.trim().isEmpty()) {
+            authenticated = conn.authenticateWithPublicKey(user, privateKey.toCharArray(), password);
+        } else if (password != null && !password.isEmpty()) {
+            authenticated = conn.authenticateWithPassword(user, password);
+        } else {
+            authenticated = conn.authenticateWithNone(user);
         }
+        if (!authenticated) throw new IOException("SSH authentication failed. Check username, password or private key.");
 
-        if (!isAuthenticated) {
-            throw new RuntimeException("Cannot authenticate with the provided credentials");
-        }
-
-        // TODO: assign port automatically instead of using 1080
-        forwarder = conn.createDynamicPortForwarder(Integer.parseInt(Optional.of(sharedPreferences.getString("forwarder_port", "1080")).orElse("1080")));
+        int localPort;
+        try { localPort = Integer.parseInt(sharedPreferences.getString("forwarder_port", "1080")); }
+        catch (Exception e) { localPort = 1080; }
+        if (localPort < 1 || localPort > 65535) localPort = 1080;
+        forwarder = conn.createDynamicPortForwarder(localPort);
         PortForward.getInstance().setForwarder(forwarder);
+        Log.i(TAG, "SSH authenticated; local SOCKS5 forwarder listening on 127.0.0.1:" + localPort);
     }
 
-    @Override
-    public void onDestroy() {
-        Log.d(TAG, "Shutting down gracefully");
-        sshThread = PortForward.getInstance().getSshThread();
-        if (sshThread != null) {
-            sshThread.interrupt();
+    private PayloadProfile findPayload(String uuid) {
+        if (uuid == null || uuid.trim().isEmpty()) return null;
+        for (PayloadProfile profile : new PayloadProfileManager(this).loadProfiles()) {
+            if (profile != null && uuid.equals(profile.uuid)) return profile;
         }
-    }
-
-    @Override
-    public IBinder onBind(Intent intent) {
         return null;
     }
 
-    public Thread newSshThread(Intent intent) {
-        //noinspection Convert2Lambda
-        return new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    System.setProperty("user.home", getFilesDir().getAbsolutePath());
-                    initiateSSH(intent);
-                    while (true) {
-                        if (Thread.interrupted()) {
-                            throw new InterruptedException();
-                        }
-                    }
-                } catch (IOException | RuntimeException e) {
-                    e.printStackTrace();
-                    Log.d(TAG, "trilead.ssh2 failed, and there is no fallback yet ¯\\_(ツ)_/¯");
-                } catch (InterruptedException e) {
-                    conn = PortForward.getInstance().getConn();
-                    forwarder = PortForward.getInstance().getForwarder();
-                    conn.close();
-                    forwarder.close();
+    /*
+     * sshlib's HTTPProxyData always sends an HTTP CONNECT request. Payload
+     * templates are therefore interpreted as CONNECT request headers, not as
+     * arbitrary raw HTTP methods. A POST/GET request cannot be used to carry
+     * an SSH byte stream with this transport.
+     */
+    static String[] parseConnectPayload(String template, String sshHost, int sshPort) throws IOException {
+        if (template == null || template.trim().isEmpty()) throw new IOException("Payload is empty");
+        String expanded = template.replace("[host_port]", sshHost + ":" + sshPort)
+                .replace("[host]", sshHost)
+                .replace("[port]", String.valueOf(sshPort))
+                .replace("[ua]", "godarmxvpn/1.0")
+                .replace("[crlf]", "\r\n");
+        String normalized = expanded.replace("\r\n", "\n").replace("\r", "\n");
+        String[] lines = normalized.split("\n");
+        List<String> headers = new ArrayList<>();
+        int firstHeader = 0;
+        if (lines.length > 0 && lines[0].trim().length() > 0) {
+            String request = lines[0].trim();
+            if (request.startsWith("POST ") || request.startsWith("GET ") || request.startsWith("PATCH ")
+                    || request.startsWith("PUT ") || request.startsWith("HEAD ")) {
+                throw new IOException("This payload uses " + request.split(" ")[0]
+                        + ". Current SSH transport supports HTTP CONNECT payloads only. Use a CONNECT request template.");
+            }
+            if (request.startsWith("CONNECT ")) firstHeader = 1;
+            else if (request.startsWith("HTTP/")) firstHeader = 1;
+        }
+        for (int i = firstHeader; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.isEmpty()) continue;
+            if (line.regionMatches(true, 0, "Host:", 0, 5)) continue;
+            if (line.indexOf('\r') >= 0 || line.indexOf('\n') >= 0) throw new IOException("Invalid payload header");
+            if (line.indexOf(':') <= 0) throw new IOException("Invalid HTTP payload header: " + line);
+            headers.add(line);
+        }
+        return headers.toArray(new String[0]);
+    }
+
+    @Override public void onDestroy() {
+        Log.d(TAG, "Shutting down SSH service");
+        Thread current = PortForward.getInstance().getSshThread();
+        if (current != null) current.interrupt();
+        closeConnection();
+        super.onDestroy();
+    }
+
+    private void closeConnection() {
+        try { if (forwarder != null) forwarder.close(); } catch (Exception ignored) { }
+        try { if (conn != null) conn.close(); } catch (Exception ignored) { }
+        forwarder = null;
+        conn = null;
+    }
+
+    @Override public IBinder onBind(Intent intent) { return null; }
+
+    private Thread newSshThread(Intent intent) {
+        return new Thread(() -> {
+            try {
+                System.setProperty("user.home", getFilesDir().getAbsolutePath());
+                initiateSSH(intent);
+                while (!Thread.currentThread().isInterrupted() && conn != null && conn.isAuthenticationComplete()) {
+                    try { Thread.sleep(500); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                }
+            } catch (IOException | RuntimeException e) {
+                Log.e(TAG, "SSH tunnel failed: " + e.getMessage(), e);
+                closeConnection();
+                stopSelf();
+            } finally {
+                if (Thread.currentThread().isInterrupted()) {
+                    closeConnection();
                     stopSelf();
                 }
             }
-        });
+        }, "SSH-Tunnel");
     }
 }
