@@ -8,7 +8,6 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
-import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -44,7 +43,6 @@ public class NewConnectionActivity extends AppCompatActivity {
     private SSHConnectionProfileManager sshConnectionProfileManager;
     private PayloadProfileManager payloadManager;
     private UUID profileUuid;
-    private RadioGroup connectionModeGroup;
     private Spinner payloadSpinner;
     private List<PayloadProfile> payloadProfiles = new ArrayList<>();
 
@@ -70,7 +68,6 @@ public class NewConnectionActivity extends AppCompatActivity {
         addKeyButton = findViewById(R.id.addKeyButton);
         keyCard = findViewById(R.id.keyCard);
         saveButton = findViewById(R.id.floatingActionButton);
-        connectionModeGroup = findViewById(R.id.connectionModeGroup);
         payloadSpinner = findViewById(R.id.payloadSpinner);
         payloadLabel = findViewById(R.id.payloadLabel);
 
@@ -101,10 +98,6 @@ public class NewConnectionActivity extends AppCompatActivity {
             authDropdown.setText("Password", false);
         }
 
-        connectionModeGroup.check("PAYLOAD".equals(sshConnectionProfile.getConnectionMode())
-                ? R.id.payloadModeRadio : R.id.directModeRadio);
-        updatePayloadVisibility();
-        connectionModeGroup.setOnCheckedChangeListener((group, checkedId) -> updatePayloadVisibility());
 
         authDropdown.setOnItemClickListener((parent, view, position, id) -> {
             if (position == 0) {
@@ -127,17 +120,11 @@ public class NewConnectionActivity extends AppCompatActivity {
     private void loadPayloadChoices() {
         payloadProfiles = payloadManager.loadProfiles();
         List<String> labels = new ArrayList<>();
+        labels.add("Direct SSH (no payload)");
         for (PayloadProfile p : payloadProfiles) labels.add(p.name + " (" + p.proxyHost + ":" + p.proxyPort + ")");
-        if (labels.isEmpty()) labels.add("No saved payloads — open Payload Manager");
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         payloadSpinner.setAdapter(adapter);
-    }
-
-    private void updatePayloadVisibility() {
-        boolean usePayload = connectionModeGroup.getCheckedRadioButtonId() == R.id.payloadModeRadio;
-        payloadLabel.setVisibility(usePayload ? View.VISIBLE : View.GONE);
-        payloadSpinner.setVisibility(usePayload ? View.VISIBLE : View.GONE);
     }
 
     private void saveProfile() {
@@ -150,9 +137,10 @@ public class NewConnectionActivity extends AppCompatActivity {
             Toast.makeText(this, "Enter SSH host, username and a valid port", Toast.LENGTH_LONG).show();
             return;
         }
-        boolean usePayload = connectionModeGroup.getCheckedRadioButtonId() == R.id.payloadModeRadio;
-        if (usePayload && payloadProfiles.isEmpty()) {
-            Toast.makeText(this, "Add a payload in Payload Manager first", Toast.LENGTH_LONG).show();
+        int selectedPayloadPosition = payloadSpinner.getSelectedItemPosition();
+        boolean usePayload = selectedPayloadPosition > 0;
+        if (usePayload && selectedPayloadPosition - 1 >= payloadProfiles.size()) {
+            Toast.makeText(this, "Selected payload is unavailable", Toast.LENGTH_LONG).show();
             return;
         }
         sshConnectionProfile.setAuthenticationType(authenticationType);
@@ -160,7 +148,7 @@ public class NewConnectionActivity extends AppCompatActivity {
         sshConnectionProfile.setServerPort(port);
         sshConnectionProfile.setUsername(user);
         sshConnectionProfile.setConnectionMode(usePayload ? "PAYLOAD" : "DIRECT");
-        if (usePayload) sshConnectionProfile.setPayloadUuid(payloadProfiles.get(payloadSpinner.getSelectedItemPosition()).uuid);
+        if (usePayload) sshConnectionProfile.setPayloadUuid(payloadProfiles.get(selectedPayloadPosition - 1).uuid);
         else sshConnectionProfile.setPayloadUuid(null);
         if (authenticationType == SSHConnectionProfile.AuthenticationType.PASSWORD) {
             sshConnectionProfile.setPassword(passwordInput.getText() == null ? "" : passwordInput.getText().toString());
