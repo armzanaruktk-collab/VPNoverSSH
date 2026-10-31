@@ -2,7 +2,6 @@ package ru.anton2319.vpnoverssh.data;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-
 import java.util.UUID;
 
 public class SSHConnectionProfile {
@@ -10,80 +9,35 @@ public class SSHConnectionProfile {
     private int serverPort;
     private String username;
     private AuthenticationType authenticationType;
-
     private String password;
-
     private String privateKey;
+    private String connectionMode = "DIRECT";
+    private String payloadUuid;
 
-    public enum AuthenticationType {
-        PASSWORD,
-        PRIVATE_KEY
-    }
-
+    public enum AuthenticationType { PASSWORD, PRIVATE_KEY }
     public UUID uuid = UUID.randomUUID();
-
     public SSHConnectionProfile() {}
-
     public SSHConnectionProfile(String serverIP, int serverPort, String username, AuthenticationType authenticationType) {
-        this.serverIP = serverIP;
-        this.serverPort = serverPort;
-        this.username = username;
-        this.authenticationType = authenticationType;
+        this.serverIP = serverIP; this.serverPort = serverPort; this.username = username; this.authenticationType = authenticationType;
     }
-
-
-    // Avoid compilation checks for types (GSON converts types from SSHConnectionProfile to LinkedTreeMap)
-    public static SSHConnectionProfile fromLinkedTreeMap(Object linkedTreeMap) {
+    public static SSHConnectionProfile fromLinkedTreeMap(Object value) {
         Gson gson = new GsonBuilder().create();
-        String json = gson.toJson(linkedTreeMap);
-        return gson.fromJson(json, SSHConnectionProfile.class);
+        return gson.fromJson(gson.toJson(value), SSHConnectionProfile.class);
     }
-
-    public String getServerIP() {
-        return serverIP;
-    }
-
-    public void setServerIP(String serverIP) {
-        this.serverIP = serverIP;
-    }
-
-    public int getServerPort() {
-        return serverPort;
-    }
-
-    public void setServerPort(int serverPort) {
-        this.serverPort = serverPort;
-    }
-
-    public String getUsername() {
-        return username;
-    }
-
-    public void setUsername(String username) {
-        this.username = username;
-    }
-
-    public AuthenticationType getAuthenticationType() {
-        return authenticationType;
-    }
-
-    public void setAuthenticationType(AuthenticationType authenticationType) {
-        this.authenticationType = authenticationType;
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
-    }
-
-    public void setPrivateKey(String privateKey) {
-        this.privateKey = privateKey;
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    public String getPrivateKey() {
-        return privateKey;
-    }
+    public String getServerIP() { return serverIP; }
+    public void setServerIP(String value) { serverIP = value; }
+    public int getServerPort() { return serverPort; }
+    public void setServerPort(int value) { serverPort = value; }
+    public String getUsername() { return username; }
+    public void setUsername(String value) { username = value; }
+    public AuthenticationType getAuthenticationType() { return authenticationType; }
+    public void setAuthenticationType(AuthenticationType value) { authenticationType = value; }
+    public void setPassword(String value) { password = value; }
+    public void setPrivateKey(String value) { privateKey = value; }
+    public String getPassword() { return password; }
+    public String getPrivateKey() { return privateKey; }
+    public String getConnectionMode() { return connectionMode == null ? "DIRECT" : connectionMode; }
+    public void setConnectionMode(String value) { connectionMode = value; }
+    public String getPayloadUuid() { return payloadUuid; }
+    public void setPayloadUuid(String value) { payloadUuid = value; }
 }
